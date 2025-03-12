@@ -1,0 +1,14 @@
+#!/bin/zsh
+
+export OLLAMA_URL="http://127.0.0.1:11434"
+export OLLAMA_MODEL_ID="llama3.1"
+export HiShellPromptMessage="[HiShell]
+"
+export HiShellWelcomeMessage="Welcome to HiShell v1.0
+Press \`Ctrl+D\` to exit.
+"
+export HiShellWorkingDirectory="/Users/huangxiaoren/Local Workspace/GitHub/MrHihi.HiShell/HiShell/csx"
+
+dotnet run --project HiShell.csproj
+
+# $HiShellWorkingDirectory/../bin/Debug/net8.0/HiShell
