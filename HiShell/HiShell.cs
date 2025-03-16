@@ -2,20 +2,145 @@
 using System.Text;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
+using TextCopy;
 using MrHihi.HiConsole;
 using static MrHihi.HiConsole.CommandPrompt;
 
 namespace MrHihi.HiShell;
 public class HiShell
 {
+    public class Globals
+    {
+        static ShellEnvironment? _env;
+        public static ShellEnvironment? Env
+        {
+            get => _env;
+            set => _env = value;
+        }
+        public static string GetBuffer() => _env?.GetBuffer()??string.Empty;
+        public static string[] GetCommandlineArgs() => _env?.GetCommandlineArgs()??[];
+        public static TextWriter Console => _env?.Console??throw new InvalidOperationException("Console is not initialized.");
+    }
     private readonly NuGetInstaller _nuget;
-    private readonly Dictionary<string, Func<string, string, string, bool>> _internalCommands;
+    private readonly Dictionary<string, Func<EnterPressArgs, string, string, string, bool>> _internalCommands;
     private readonly CommandPrompt _console;
     private readonly HistoryCollection _histories = new HistoryCollection();
+    private bool clear(EnterPressArgs epr, string cmdname, string cmd, string buffer)
+    {
+        Console.Clear();
+        var cmds = cmd.Split(' ');
+        if (cmds.Length > 1 && cmds[1].ToLower() == "nuget")
+        {
+            try
+            {
+                _nuget.CleanNugetPackages();
+                Console.WriteLine("NuGet packages cleared.");
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine($"Error: {e.Message}");
+            }
+        }
+        return true;
+    }
+    private bool csx(EnterPressArgs epr, string cmdname, string cmd, string buffer)
+    {
+        var cmds = cmd.Split(' ');
+        if (cmds.Length < 2)
+        {
+            Console.WriteLine("Usage: /csx <run | [list | ls]>");
+            Console.WriteLine("  run: Run the specified CS from buffer.");
+            return true;
+        }
+        if (cmds[1].ToLower() == "list" || cmds[1].ToLower() == "ls")
+        {
+            var csxDir = Directory.GetDirectories(Environment.CurrentDirectory);
+            foreach(var csx in csxDir)
+            {
+                var n = Path.GetFileName(csx);
+                if (n == "nuget_packages") continue;
+                Console.WriteLine(n);
+            }
+        }
+        else if (cmds[1].ToLower() == "run")
+        {
+            runScript(Environment.CurrentDirectory, buffer, cmdname, cmd, string.Empty).Wait();
+        }
+        return true;
+    }
+    private bool history(EnterPressArgs epr, string cmdname, string cmd, string buffer)
+    {
+        if (_histories.Count == 0) return true;
+        var cmds = cmd.Split(' ');
+        if(cmds.Length == 1) {
+            var last = _histories.Last();
+            Console.WriteLine($"Last command: {last.Command}");
+            Console.WriteLine($"Result: {last.Result}");
+            Console.WriteLine($"Console output: {last.ConsoleOutput}");
+        } else if (cmds[1].ToLower() == "all") {
+            foreach(var h in _histories) {
+                Console.WriteLine($"Command: {h.Command}");
+                Console.WriteLine($"Result: {h.Result}");
+                Console.WriteLine($"Console output:\n{h.ConsoleOutput}");
+                Console.WriteLine();
+            }
+        } else if (cmds[1].ToLower() == "clear") {
+            _histories.Clear();
+            Console.WriteLine("History cleared.");
+        } else if (cmds[1].ToLower() == "clip") {
+            var last = _histories.Last();
+            if (last == null) return true;
+            if (string.IsNullOrEmpty(last.ConsoleOutput)) return true;
+            ClipboardService.SetText(last.ConsoleOutput);
+            Console.WriteLine("Result copied to clipboard.");
+        } else if (cmds[1].ToLower() == "save") {
+            if (cmds.Length < 3) {
+                Console.WriteLine("Please specify the file name.");
+                return true;
+            }
+
+            var filePath = Path.GetFullPath(cmds[2], "/").Remove(0, 1);
+            filePath = filePath.Replace("~/", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "/");
+
+            Console.WriteLine($"Saving history to {filePath} ...");
+            try {
+                StringBuilder sb = new StringBuilder();
+                foreach(var h in _histories) {
+                    sb.AppendLine($"Command: {h.Command}");
+                    sb.AppendLine($"Result: {h.Result}");
+                    sb.AppendLine($"Console output: {h.ConsoleOutput}");
+                    sb.AppendLine();
+                }
+                File.WriteAllText(filePath, sb.ToString());
+                Console.WriteLine($"History saved to {filePath}");
+            } catch (Exception e) {
+                Console.WriteLine($"Error: {e.Message}");
+            }
+        }
+        return true;
+    }
+    private bool help(EnterPressArgs epr, string cmdname, string cmd, string buffer)
+    {
+        Console.WriteLine("HiShell v1.0");
+        Console.WriteLine("Commands:");
+        Console.WriteLine("  /clear: Clear console output.");
+        Console.WriteLine("  /clear nuget: Clear NuGet packages.");
+        Console.WriteLine("  /csx <run | [list | ls]>: Run the specified CS from buffer.");
+        Console.WriteLine("  /history [all | clear | clip | save <file>]: Show command history.");
+        Console.WriteLine("  /exit: Exit HiShell.");
+        Console.WriteLine("  /help: Show this help message.");
+        Console.WriteLine();
+        return true;
+    }
+    private bool exit(EnterPressArgs epr, string cmdname, string cmd, string buffer)
+    {
+        epr.Cancel = true;
+        return true;
+    }
     public HiShell()
     {
         var promptMessage = Environment.GetEnvironmentVariable("HiShellPromptMessage", EnvironmentVariableTarget.Process)??"─> ";
-        var welcomeMessage = Environment.GetEnvironmentVariable("HiShellWelcomeMessage", EnvironmentVariableTarget.Process)??"Welcome to HiShell v1.0\nPress `Ctrl+D` to exit.\n";
+        var welcomeMessage = Environment.GetEnvironmentVariable("HiShellWelcomeMessage", EnvironmentVariableTarget.Process)??"Welcome to HiShell v1.0\nPress `Ctrl+D` to exit. Input `/help` for help.\n";
         var workingDir = Environment.GetEnvironmentVariable("HiShellWorkingDirectory", EnvironmentVariableTarget.Process)??Environment.CurrentDirectory;
         _nuget = new NuGetInstaller(workingDir);
         if (!string.IsNullOrEmpty(workingDir) && Directory.Exists(workingDir))
@@ -23,82 +148,34 @@ public class HiShell
             Environment.CurrentDirectory = workingDir;
         }
         
-        _internalCommands = new Dictionary<string, Func<string, string, string, bool>>()
+        _internalCommands = new Dictionary<string, Func<EnterPressArgs, string, string, string, bool>>()
         {
-            { "/clear", (cmdname, cmd, buffer) => {
-                Console.Clear();
-                var cmds = cmd.Split(' ');
-                if (cmds.Length > 1 && cmds[1].ToLower() == "nuget")
-                {
-                    try
-                    {
-                        _nuget.CleanNugetPackages();
-                        Console.WriteLine("NuGet packages cleared.");
-                    }
-                    catch(Exception e)
-                    {
-                        Console.WriteLine($"Error: {e.Message}");
-                    }
-                }
-                return true;
-            }},
-            { "/run", (cmdname, cmd, buffer) => {
-                runScript(Environment.CurrentDirectory, buffer, cmdname, cmd, string.Empty).Wait();
-                return true;
-            }},
-            { "/history", (cmdname, cmd, buffer) => {
-                if (_histories.Count == 0) return true;
-                var cmds = cmd.Split(' ');
-                if(cmds.Length == 1) {
-                    var last = _histories.Last();
-                    Console.WriteLine($"Last command: {last.Command}");
-                    Console.WriteLine($"Result: {last.Result}");
-                    Console.WriteLine($"Console output: {last.ConsoleOutput}");
-                } else if (cmds[1].ToLower() == "all") {
-                    foreach(var h in _histories) {
-                        Console.WriteLine($"Command: {h.Command}");
-                        Console.WriteLine($"Result: {h.Result}");
-                        Console.WriteLine($"Console output: {h.ConsoleOutput}");
-                        Console.WriteLine();
-                    }
-                } else if (cmds[1].ToLower() == "clear") {
-                    _histories.Clear();
-                    Console.WriteLine("History cleared.");
-                } else if (cmds[1].ToLower() == "save") {
-                    if (cmds.Length < 3) {
-                        Console.WriteLine("Please specify the file name.");
-                        return true;
-                    }
-
-                    var filePath = Path.GetFullPath(cmds[2], "/").Remove(0, 1);
-                    filePath = filePath.Replace("~/", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "/");
-
-                    Console.WriteLine($"Saving history to {filePath} ...");
-                    try {
-                        StringBuilder sb = new StringBuilder();
-                        foreach(var h in _histories) {
-                            sb.AppendLine($"Command: {h.Command}");
-                            sb.AppendLine($"Result: {h.Result}");
-                            sb.AppendLine($"Console output: {h.ConsoleOutput}");
-                            sb.AppendLine();
-                        }
-                        File.WriteAllText(filePath, sb.ToString());
-                        Console.WriteLine($"History saved to {filePath}");
-                    } catch (Exception e) {
-                        Console.WriteLine($"Error: {e.Message}");
-                    }
-                }
-                return true;
-            }}
+            { "/clear", clear },
+            { "/csx", csx },
+            { "/history", history },
+            { "/exit", exit },
+            { "/help", help }
         };
-        _console = new CommandPrompt(enumChatMode.MultiLineCommand);
-        _console.CommandEnter += Console_CommandEnter;
-        _console.BeforeCommandEnter += Console_BeforeCommandEnter;
-        _console.Start(welcomeMessage, promptMessage);
+        _console = new CommandPrompt(enumChatMode.MultiLineCommand, welcomeMessage, promptMessage);
+        _console.MultiLineCommand_EnterPress += Console_MultiLineCommand_EnterPress;
+        _console.Start();
     }
 
-    private async Task runExternalCommand(string commandName, string command, string buffer)
+    private void Console_MultiLineCommand_EnterPress(object? sender, EnterPressArgs e)
     {
+        if ( checkCommand(e.Command) )
+        {
+            e.Triggered = true;
+            e.WriteResult(()=>{
+                runCommand(e);
+            });
+        }
+    }
+
+    private async Task runExternalCommand(EnterPressArgs epr, string commandName)
+    {
+        string command = epr.Command;
+        string buffer = epr.Buffer;
         var csxFilePath = $"{Environment.CurrentDirectory}/{commandName}/{commandName}.csx";
         if (!File.Exists(csxFilePath))
         {
@@ -113,16 +190,18 @@ public class HiShell
         catch (Exception e)
         {
             Console.WriteLine($"Error: {e.Message}");
-            Console.WriteLine(e.StackTrace);
+            // Console.WriteLine(e.StackTrace);
             Console.WriteLine();
         }
     }
-    private bool runInternalCommand(string commandName, string command, string buffer)
+    private bool runInternalCommand(EnterPressArgs e, string commandName)
     {
+        string command = e.Command;
+        string buffer = e.Buffer;
         var lcmdName = commandName.ToLower();;
         if (_internalCommands.ContainsKey(lcmdName))
         {
-            _internalCommands[lcmdName](lcmdName, command, trimEndString(buffer, command).TrimEnd('\n'));
+            _internalCommands[lcmdName](e, lcmdName, command, trimEndString(buffer, command).TrimEnd('\n'));
             return true;
         }
         return false;
@@ -141,19 +220,22 @@ public class HiShell
                             .AddReferences(references)
                             .AddImports("System", "System.Text", "System.IO", "System.Net.Http", "System.Collections.Generic", "System.Threading.Tasks")
                             ;
-        return CSharpScript.Create<string>(processedScript, globalsType: typeof(ShellEnvironment), options: ccsOptions);
+        return CSharpScript.Create<string>(processedScript, globalsType: typeof(Globals), options: ccsOptions);
     }
 
     private async Task<string> runScript(string baseDir, string scriptCode, string cmdName, string command, string buffer)
     {
         var history = new History(buffer, cmdName, command);
         Console.WriteLine($"Running command: {command} ...");
+        Console.WriteLine();
         var script = await createScript(scriptCode, baseDir);
         var args = new ShellEnvironment(trimEndString(buffer, command).TrimEnd('\n'), cmdName, command);
-        var result = (await script.RunAsync(globals: args)).ReturnValue;
+        Globals.Env = args;
+        var result = (await script.RunAsync(globals: new Globals())).ReturnValue;
         history.Result = result;
         history.ConsoleOutput = args.Console.ToString();
         _histories.Add(history);
+        Console.WriteLine();
         Console.WriteLine();
        return result;
     }
@@ -165,14 +247,14 @@ public class HiShell
         return commandName;
     }
 
-    private void runCommand(string command, string buffer)
+    private void runCommand(EnterPressArgs e)
     {
-        var commandName = getCommandName(command);
-        if (runInternalCommand(commandName, command, buffer))
+        var commandName = getCommandName(e.Command);
+        if (runInternalCommand(e, commandName))
         {
             return;
         }
-        runExternalCommand(commandName, command, buffer).Wait();
+        runExternalCommand(e, commandName).Wait();
     }
 
     private bool checkCommand(string command)
@@ -189,23 +271,6 @@ public class HiShell
             return true;
         }
         return false;
-    }
-
-    private void Console_CommandEnter(object? sender, CommandEnterArgs e)
-    {
-        if (e.Trigger == string.Empty) // onelinecommand 才會跑這邊
-        {
-            runCommand(e.Command, string.Empty);
-        }
-        else
-        {
-            runCommand(e.Trigger, e.Command);
-        }
-    }
-
-    private void Console_BeforeCommandEnter(object? sender, BeforeCommandEnterArgs e)
-    {
-        e.TriggerSend = checkCommand(e.InputLine);
     }
 
     private string trimEndString(string input, string suffix)

@@ -1,0 +1,4 @@
+#!/bin/zsh
+
+find . -depth -name bin -exec rm -rf {} \;
+find . -depth -name obj -exec rm -rf {} \;
