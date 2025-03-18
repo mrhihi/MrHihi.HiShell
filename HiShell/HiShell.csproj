@@ -10,11 +10,15 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.13.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.2" />
-    <PackageReference Include="microsoft.extensions.http" Version="9.0.2" />
-    <PackageReference Include="MrHihi.HiConsole" Version="1.0.1-pre3" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.3" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.3" />
+    <PackageReference Include="microsoft.extensions.http" Version="9.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.3" />
+    <PackageReference Include="MrHihi.HiConsole" Version="1.0.1" />
     <PackageReference Include="NuGet.PackageManagement" Version="6.13.2" />
     <PackageReference Include="NuGet.Protocol" Version="6.13.2" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="9.0.3" />
     <PackageReference Include="System.Diagnostics.Process" Version="4.3.0" />
     <PackageReference Include="TextCopy" Version="6.2.1" />
   </ItemGroup>

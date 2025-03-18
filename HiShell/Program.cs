@@ -20,8 +20,8 @@ class Program
                     File.WriteAllText(shellfile, @$"#!/bin/zsh
 export HiShellPromptMessage=""[HiShell] > ""
 export HiShellWelcomeMessage=""Welcome to HiShell v1.0
-Press \`Ctrl+D\` to exit.
-""
+Press \`Ctrl+D\` to exit. Input \`/help\` for help.""
+
 export HiShellWorkingDirectory=""{path}""
 
 HiShell

@@ -7,15 +7,16 @@ namespace MrHihi.HiShell;
 
 public class HiConsole : StringWriter
 {
+    private readonly TextWriter _console = Console.Out;
     public override void Write(char value)
     {
         base.Write(value);
-        Console.Write(value);
+        _console.Write(value);
     }
     public override void Write(char[] buffer, int index, int count)
     {
         base.Write(buffer, index, count);
-        Console.Write(buffer, index, count);
+        _console.Write(buffer, index, count);
     }
     public override void Write(ReadOnlySpan<char> buffer)
     {
@@ -24,12 +25,12 @@ public class HiConsole : StringWriter
     public override void Write(string? value)
     {
         base.Write(value);
-        Console.Write(value);
+        _console.Write(value);
     }
     public override void Write(StringBuilder? value)
     {
         base.Write(value);
-        Console.Write(value);
+        _console.Write(value);
     }
     public override void WriteLine(ReadOnlySpan<char> buffer)
     {
@@ -38,7 +39,7 @@ public class HiConsole : StringWriter
     public override void WriteLine(StringBuilder? value)
     {
         base.WriteLine(value);
-        Console.WriteLine(value);
+        _console.WriteLine(value);
     }
     // public override async Task WriteAsync(char value)
     // {

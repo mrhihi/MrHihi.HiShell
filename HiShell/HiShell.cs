@@ -2,9 +2,8 @@
 using System.Text;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
-using TextCopy;
 using MrHihi.HiConsole;
-using static MrHihi.HiConsole.CommandPrompt;
+using MrHihi.HiShell.InternalCommands;
 
 namespace MrHihi.HiShell;
 public class HiShell
@@ -21,122 +20,11 @@ public class HiShell
         public static string[] GetCommandlineArgs() => _env?.GetCommandlineArgs()??[];
         public static TextWriter Console => _env?.Console??throw new InvalidOperationException("Console is not initialized.");
     }
-    private readonly NuGetInstaller _nuget;
-    private readonly Dictionary<string, Func<EnterPressArgs, string, string, string, bool>> _internalCommands;
+    internal readonly NuGetInstaller _nuget;
+    internal readonly List<IInternalCommand> _internalCommands;
     private readonly CommandPrompt _console;
-    private readonly HistoryCollection _histories = new HistoryCollection();
-    private bool clear(EnterPressArgs epr, string cmdname, string cmd, string buffer)
-    {
-        Console.Clear();
-        var cmds = cmd.Split(' ');
-        if (cmds.Length > 1 && cmds[1].ToLower() == "nuget")
-        {
-            try
-            {
-                _nuget.CleanNugetPackages();
-                Console.WriteLine("NuGet packages cleared.");
-            }
-            catch(Exception e)
-            {
-                Console.WriteLine($"Error: {e.Message}");
-            }
-        }
-        return true;
-    }
-    private bool csx(EnterPressArgs epr, string cmdname, string cmd, string buffer)
-    {
-        var cmds = cmd.Split(' ');
-        if (cmds.Length < 2)
-        {
-            Console.WriteLine("Usage: /csx <run | [list | ls]>");
-            Console.WriteLine("  run: Run the specified CS from buffer.");
-            return true;
-        }
-        if (cmds[1].ToLower() == "list" || cmds[1].ToLower() == "ls")
-        {
-            var csxDir = Directory.GetDirectories(Environment.CurrentDirectory);
-            foreach(var csx in csxDir)
-            {
-                var n = Path.GetFileName(csx);
-                if (n == "nuget_packages") continue;
-                Console.WriteLine(n);
-            }
-        }
-        else if (cmds[1].ToLower() == "run")
-        {
-            runScript(Environment.CurrentDirectory, buffer, cmdname, cmd, string.Empty).Wait();
-        }
-        return true;
-    }
-    private bool history(EnterPressArgs epr, string cmdname, string cmd, string buffer)
-    {
-        if (_histories.Count == 0) return true;
-        var cmds = cmd.Split(' ');
-        if(cmds.Length == 1) {
-            var last = _histories.Last();
-            Console.WriteLine($"Last command: {last.Command}");
-            Console.WriteLine($"Result: {last.Result}");
-            Console.WriteLine($"Console output: {last.ConsoleOutput}");
-        } else if (cmds[1].ToLower() == "all") {
-            foreach(var h in _histories) {
-                Console.WriteLine($"Command: {h.Command}");
-                Console.WriteLine($"Result: {h.Result}");
-                Console.WriteLine($"Console output:\n{h.ConsoleOutput}");
-                Console.WriteLine();
-            }
-        } else if (cmds[1].ToLower() == "clear") {
-            _histories.Clear();
-            Console.WriteLine("History cleared.");
-        } else if (cmds[1].ToLower() == "clip") {
-            var last = _histories.Last();
-            if (last == null) return true;
-            if (string.IsNullOrEmpty(last.ConsoleOutput)) return true;
-            ClipboardService.SetText(last.ConsoleOutput);
-            Console.WriteLine("Result copied to clipboard.");
-        } else if (cmds[1].ToLower() == "save") {
-            if (cmds.Length < 3) {
-                Console.WriteLine("Please specify the file name.");
-                return true;
-            }
+    internal readonly HistoryCollection _histories = new HistoryCollection();
 
-            var filePath = Path.GetFullPath(cmds[2], "/").Remove(0, 1);
-            filePath = filePath.Replace("~/", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "/");
-
-            Console.WriteLine($"Saving history to {filePath} ...");
-            try {
-                StringBuilder sb = new StringBuilder();
-                foreach(var h in _histories) {
-                    sb.AppendLine($"Command: {h.Command}");
-                    sb.AppendLine($"Result: {h.Result}");
-                    sb.AppendLine($"Console output: {h.ConsoleOutput}");
-                    sb.AppendLine();
-                }
-                File.WriteAllText(filePath, sb.ToString());
-                Console.WriteLine($"History saved to {filePath}");
-            } catch (Exception e) {
-                Console.WriteLine($"Error: {e.Message}");
-            }
-        }
-        return true;
-    }
-    private bool help(EnterPressArgs epr, string cmdname, string cmd, string buffer)
-    {
-        Console.WriteLine("HiShell v1.0");
-        Console.WriteLine("Commands:");
-        Console.WriteLine("  /clear: Clear console output.");
-        Console.WriteLine("  /clear nuget: Clear NuGet packages.");
-        Console.WriteLine("  /csx <run | [list | ls]>: Run the specified CS from buffer.");
-        Console.WriteLine("  /history [all | clear | clip | save <file>]: Show command history.");
-        Console.WriteLine("  /exit: Exit HiShell.");
-        Console.WriteLine("  /help: Show this help message.");
-        Console.WriteLine();
-        return true;
-    }
-    private bool exit(EnterPressArgs epr, string cmdname, string cmd, string buffer)
-    {
-        epr.Cancel = true;
-        return true;
-    }
     public HiShell()
     {
         var promptMessage = Environment.GetEnvironmentVariable("HiShellPromptMessage", EnvironmentVariableTarget.Process)??"─> ";
@@ -147,18 +35,40 @@ public class HiShell
         {
             Environment.CurrentDirectory = workingDir;
         }
-        
-        _internalCommands = new Dictionary<string, Func<EnterPressArgs, string, string, string, bool>>()
-        {
-            { "/clear", clear },
-            { "/csx", csx },
-            { "/history", history },
-            { "/exit", exit },
-            { "/help", help }
-        };
+
+        // 尋找 namespace InternalCommands 下所有 IInternalCommand 的實作
+        _internalCommands = Assembly.GetExecutingAssembly().GetTypes()
+            .Where(x => x.Namespace == "MrHihi.HiShell.InternalCommands" 
+                && x.GetInterfaces().Contains(typeof(IInternalCommand))
+                && !x.IsAbstract)
+            .Select(x => Activator.CreateInstance(x, this) as IInternalCommand??throw new InvalidOperationException($"Cannot create instance of {x.Name}"))
+            .ToList()??throw new InvalidOperationException("No internal commands found.");
+
         _console = new CommandPrompt(enumChatMode.MultiLineCommand, welcomeMessage, promptMessage);
         _console.MultiLineCommand_EnterPress += Console_MultiLineCommand_EnterPress;
+        _console.CommandInput_TouchTop += Console_CommandInput_TouchTop;
+        _console.CommandInput_TouchBottom += Console_CommandInput_TouchBottom;
+        _console.Console_PrintInfo += Console_Console_PrintInfo;
         _console.Start();
+    }
+
+    private void Console_Console_PrintInfo(object? sender, PrintInfoArgs e)
+    {
+        e.Info = $" ┌──┤ {e.Info} HI/HC:{_histories.SeekIndex}/{_histories.Count}";
+    }
+
+    private void Console_CommandInput_TouchTop(object? sender, CommandTouchArgs e)
+    {
+        var last = _histories.SeekPrevious();
+        e.Command = last?.Command??"";
+        e.Setting = true;
+    }
+
+    private void Console_CommandInput_TouchBottom(object? sender, CommandTouchArgs e)
+    {
+        var last = _histories.SeekNext();
+        e.Command = last?.Command??"";
+        e.Setting = true;
     }
 
     private void Console_MultiLineCommand_EnterPress(object? sender, EnterPressArgs e)
@@ -182,62 +92,77 @@ public class HiShell
             Console.WriteLine($"Command not found: {commandName}");
             return;
         }
-       try {
-            var scriptCode = File.ReadAllText(csxFilePath);
-            var baseDir = Path.Combine(Environment.CurrentDirectory, commandName);
-            var result = await runScript(baseDir, scriptCode, commandName, command, buffer);
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine($"Error: {e.Message}");
-            // Console.WriteLine(e.StackTrace);
-            Console.WriteLine();
-        }
+        var scriptCode = File.ReadAllText(csxFilePath);
+        var result = await runScript(scriptCode, commandName, command, buffer);
     }
     private bool runInternalCommand(EnterPressArgs e, string commandName)
     {
         string command = e.Command;
         string buffer = e.Buffer;
         var lcmdName = commandName.ToLower();;
-        if (_internalCommands.ContainsKey(lcmdName))
-        {
-            _internalCommands[lcmdName](e, lcmdName, command, trimEndString(buffer, command).TrimEnd('\n'));
-            return true;
+
+        var ic = _internalCommands.FirstOrDefault(x => x.NeedExecute(lcmdName, command));
+        if (ic == null) return false;
+
+        var history = new History(buffer, lcmdName, command);
+        try {
+            ic.Execute(lcmdName, command, trimEndString(buffer, command).TrimEnd('\n'), e, new HiConsole());
+        } catch (Exception ex) {
+            Console.WriteLine($"Error: {ex.Message}");
+            // Console.WriteLine(ex.StackTrace);
+            Console.WriteLine();
         }
-        return false;
+        history.ConsoleOutput = ic.ConsoleOut.ToString();
+        _histories.Add(history);
+        Console.WriteLine();
+        return true;
     }
 
-    private async Task<Script<string>> createScript(string scriptCode, string baseDir)
+    private async Task<Script<string>> createScript(string scriptCode, string commandName)
     {
+        var csxDir = Path.Combine(Environment.CurrentDirectory, commandName);
         var (processedScript, references) = await _nuget.ProcessNugetReferences(scriptCode);
-        var srcResolver = ScriptSourceResolver.Default.WithBaseDirectory(baseDir).WithSearchPaths(baseDir);
-        var scsResolver = ScriptMetadataResolver.Default.WithBaseDirectory(baseDir).WithSearchPaths(baseDir);
+        var (processedScript2, references2) = _nuget.ProcessDllReference(csxDir, processedScript);
+        var srcResolver = ScriptSourceResolver.Default.WithBaseDirectory(csxDir).WithSearchPaths(csxDir);
+        var scsResolver = ScriptMetadataResolver.Default.WithBaseDirectory(csxDir).WithSearchPaths(csxDir);
         var ccsOptions = ScriptOptions.Default
-                            .WithFilePath(baseDir)
-                            .WithSourceResolver(srcResolver)
+                            .WithFilePath(csxDir)
                             .WithMetadataResolver(scsResolver)
+                            .WithSourceResolver(srcResolver)
+                            // .WithEmitDebugInformation(true)
+                            // .WithFileEncoding(Encoding.UTF8)
                             .AddReferences(Assembly.GetExecutingAssembly())
                             .AddReferences(references)
+                            .AddReferences(references2)
                             .AddImports("System", "System.Text", "System.IO", "System.Net.Http", "System.Collections.Generic", "System.Threading.Tasks")
                             ;
-        return CSharpScript.Create<string>(processedScript, globalsType: typeof(Globals), options: ccsOptions);
+        return CSharpScript.Create<string>(processedScript2, globalsType: typeof(Globals), options: ccsOptions);
     }
 
-    private async Task<string> runScript(string baseDir, string scriptCode, string cmdName, string command, string buffer)
+    internal async Task<string> runScript(string scriptCode, string cmdName, string command, string buffer)
     {
         var history = new History(buffer, cmdName, command);
+        ShellEnvironment? args = null;
+        string? result = null;
         Console.WriteLine($"Running command: {command} ...");
         Console.WriteLine();
-        var script = await createScript(scriptCode, baseDir);
-        var args = new ShellEnvironment(trimEndString(buffer, command).TrimEnd('\n'), cmdName, command);
-        Globals.Env = args;
-        var result = (await script.RunAsync(globals: new Globals())).ReturnValue;
-        history.Result = result;
-        history.ConsoleOutput = args.Console.ToString();
+        try {
+            var script = await createScript(scriptCode, cmdName);
+            var compiled = script.Compile();
+            args = new ShellEnvironment(trimEndString(buffer, command).TrimEnd('\n'), cmdName, command);
+            Globals.Env = args;
+            result = (await script.RunAsync(globals: new Globals())).ReturnValue;
+            history.Result = result;
+        } catch (Exception ex) {
+            Console.WriteLine($"Error: {ex.Message}");
+            // Console.WriteLine(ex.StackTrace);
+            Console.WriteLine();
+        }
+        history.ConsoleOutput = args?.Console?.ToString()??"";
         _histories.Add(history);
         Console.WriteLine();
         Console.WriteLine();
-       return result;
+       return result??"";
     }
 
     private string getCommandName(string command)
@@ -260,7 +185,7 @@ public class HiShell
     private bool checkCommand(string command)
     {
         var commandName = getCommandName(command);
-        if (_internalCommands.ContainsKey(commandName.ToLower()))
+        if (_internalCommands.Any(x => x.NeedExecute(commandName, command)))
         {
             return true;
         }
