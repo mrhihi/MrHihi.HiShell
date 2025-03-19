@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+﻿using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using NuGet.Common;
 using NuGet.Configuration;
@@ -18,6 +18,7 @@ public class NuGetInstaller
     public string NugetPackageDir => Path.Combine(_workingDirectory, NugetPackagesDirName);
     private readonly ISettings _nugetSettings;
     private readonly NuGetFramework _currentFramework;
+    private static readonly bool _isWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
     public NuGetInstaller(string baseDirectory)
     {
@@ -89,13 +90,6 @@ public class NuGetInstaller
         }
         else
         {
-            // 檢查套件是否與當前框架相容
-            if (!await IsPackageCompatibleWithFramework(package, repositories, cache, logger))
-            {
-                Console.WriteLine($"Package {package.Id} version {package.Version} is not compatible with the current framework {_currentFramework.GetShortFolderName()}. Skipping.");
-                return;
-            }
-
             // 如果系統沒有且框架相容，則從可用來源下載
             packagePath = await DownloadFromSources(package, repositories, logger, cache);
             if (packagePath == null)
@@ -135,32 +129,13 @@ public class NuGetInstaller
         }
     }
 
-    // 檢查套件是否與當前框架相容
-    private async Task<bool> IsPackageCompatibleWithFramework(PackageIdentity package, List<SourceRepository> repositories, SourceCacheContext cache, ILogger logger)
-    {
-        foreach (var repository in repositories)
-        {
-            var metadataResource = await repository.GetResourceAsync<PackageMetadataResource>();
-            var metadata = await metadataResource.GetMetadataAsync(package, cache, logger, CancellationToken.None);
-            if (metadata != null)
-            {
-                var dependencyGroups = metadata.DependencySets;
-                return dependencyGroups.Any(g => IsFrameworkCompatible(_currentFramework, g.TargetFramework)) ||
-                       !dependencyGroups.Any(); // 如果沒有相依性組，假設相容
-            }
-        }
-        return false; // 未找到元數據，假設不相容
-    }
-
     // 自訂框架相容性檢查
     private bool IsFrameworkCompatible(NuGetFramework current, NuGetFramework target)
     {
         if (target.IsAny || target.IsAgnostic) return true; // 任何框架或框架不可知都相容
-        // if (current.Framework != target.Framework) return false; // 框架名稱不同不相容
 
         var reducer = new FrameworkReducer();
         var nearest = reducer.GetNearest(current, new[] { target });
-        // Console.WriteLine($"Current: {current.GetShortFolderName()}, Target: {target.GetShortFolderName()}, Nearest: {nearest?.GetShortFolderName()}");
         return nearest != null; // 如果找到最近的相容框架，則認為相容
     }
 
@@ -242,7 +217,7 @@ public class NuGetInstaller
         return (processedScript, references);
     }
 
-    private static IEnumerable<dynamic> GetDllsInfo(IEnumerable<string> packagePaths, string currentRuntime, string currentRid)
+    private static IEnumerable<dynamic> GetDllsInfo(IEnumerable<string> packagePaths, string currentRuntime)
     {
         var libFiles = 
             packagePaths.Where(i => i.EndsWith(".dll"))
@@ -251,43 +226,54 @@ public class NuGetInstaller
                 Path = i, 
                 FileName = Path.GetFileName(i),
                 Framework = GetTargetFramework(i),  // 提取目標框架
-                Rid = GetRuntimeIdentifier(i),      // 提取 RID（如果有）
-                Culture = GetCulture(i)             // 提取語系（如果有）
+                Culture = GetCulture(i),             // 提取語系（如果有）
+                Platform = GetPlatform(i)    // 提取平台（如果有）
             });
 
+        // 有 runtime 用 runttime 沒有 runtime 用 lib
+
         var result = libFiles
-            .Where(f => IsCompatibleFramework(f.FileName, f.Framework.tfm, currentRuntime) && 
-                    (string.IsNullOrEmpty(f.Rid) || f.Rid == currentRid))
-            .OrderByDescending(f => DotnetFrameworkOrder(f.Framework.tfm)) // 優先選擇較新的框架
+            .Where(f => IsCompatibleFramework(f.FileName, f.Framework.tfm, currentRuntime))
+            .OrderBy(f => DotnetDirOrder(f.Framework.dir, f.Platform)) // 優先選擇 runtime 目錄下的 lib
+            .ThenByDescending(f => DotnetFrameworkOrder(f.Framework.tfm)) // 優先選擇較新的框架
             .ThenByDescending(f => f.Framework.tfm) // 再按框架名稱排序
-            .ThenBy(f => string.IsNullOrEmpty(f.Rid) ? 0 : 1) // 優先選擇無特定 RID 的通用版本
             .GroupBy(f => new { f.FileName, f.Framework.dir })
             .SelectMany(g => 
                 !string.IsNullOrEmpty(g.First().Culture) 
                     ? g // 如果 Culture 是空字串，返回整個分組
                     : g.Take(1) // 否則只取第一個
             )
-            .Select(f => new { Path = f.Path, FileName = f.FileName, Framework = f.Framework.tfm, Dir = f.Framework.dir, Rid = f.Rid, Culture = f.Culture });
+            .Select(f => new { Path = f.Path, FileName = f.FileName, Framework = f.Framework.tfm, Dir = f.Framework.dir, Platform = f.Platform, Culture = f.Culture });
 
+        // Console.WriteLine("-------------------------------------");
         // foreach(var s in result)
         // {
-        //     Console.WriteLine($"Path: {s.Path}, FileName: {s.FileName}, Framework: {s.Framework}, Dir: {s.Dir}, Rid: {s.Rid}, Culture: {s.Culture}");
+        //     Console.WriteLine($"Path: {s.Path}, FileName: {s.FileName}, Framework: {s.Framework}, Dir: {s.Dir}, Culture: {s.Culture}");
         // }
-
+        // Console.WriteLine("=====================================");
         return result;
     }
-
-    public static int DotnetFrameworkOrder(string framework)
+    public static int DotnetDirOrder(string dir, string platform)
     {
-        if (framework.StartsWith("netstandard"))
+        if (dir == PackagingConstants.Folders.Runtimes)
+        {
+            if (_isWindows && platform == "win") return 1;
+            if (!_isWindows && platform != "win") return 1;
+            return 2;
+        }
+        return 2;
+    }
+    public static int DotnetFrameworkOrder(string tfm)
+    {
+        if (tfm.StartsWith("netstandard"))
         {
             return 3;
         }
-        if (framework.StartsWith("netcoreapp"))
+        if (tfm.StartsWith("netcoreapp"))
         {
             return 2;
         }
-        if (framework.StartsWith("net"))
+        if (tfm.StartsWith("net"))
         {
             return 4;
         }
@@ -301,14 +287,14 @@ public class NuGetInstaller
         var extractDir = Path.Combine(directoryName, Path.GetFileNameWithoutExtension(packagePath));
         
         string currentRuntime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription.TrimStart('.').Replace(" ", "").ToLower();
-        string currentRid = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier;
         string currentCulture = Thread.CurrentThread.CurrentUICulture.Name;
 
         if (!Directory.Exists(extractDir))
         {
-            // Console.WriteLine($"Extracting DLLs from {packagePath} ...");
             using var packageReader = new PackageArchiveReader(packagePath);
-            var compatibleFiles = GetDllsInfo(packageReader.GetLibItems().Concat(packageReader.GetItems(PackagingConstants.Folders.Ref)).SelectMany(g => g.Items), currentRuntime, currentRid);
+            var compatibleFiles = GetDllsInfo(packageReader.GetLibItems()
+                .Concat(packageReader.GetItems(PackagingConstants.Folders.Runtimes))
+                .SelectMany(g => g.Items), currentRuntime);
             if (compatibleFiles.Any())
             {
                 Directory.CreateDirectory(extractDir);
@@ -325,9 +311,13 @@ public class NuGetInstaller
 
                 packageReader.ExtractFile(file.Path, destPath, NullLogger.Instance);
 
-                if (compatibleFiles.Any(x => x.FileName == file.FileName 
-                                            && x.Dir != file.Dir 
-                                            && file.Dir == "lib")) continue;
+                if (compatibleFiles.Any(x => x.FileName == file.FileName && x.Dir == PackagingConstants.Folders.Runtimes)) {
+                    if (file.Dir != PackagingConstants.Folders.Runtimes) continue;
+                    if (file.Dir == PackagingConstants.Folders.Runtimes) {
+                        if (_isWindows && file.Platform != "win") continue;
+                        if (!_isWindows && file.Platform == "win") continue;
+                    }
+                }
                 if (file.Culture != "") continue;
                 yield return destPath;
             }
@@ -335,13 +325,17 @@ public class NuGetInstaller
         else
         {
             var libFiles = Directory.GetFiles(extractDir, "*.dll", SearchOption.AllDirectories).Select(x => x.Replace(extractDir, "").TrimStart('/').TrimStart('\\'));
-            var compatibleFiles = GetDllsInfo(libFiles, currentRuntime, currentRid);
+            var compatibleFiles = GetDllsInfo(libFiles, currentRuntime);
 
             foreach (var file in compatibleFiles)
             {
-                if (compatibleFiles.Any(x => x.FileName == file.FileName 
-                                            && x.Dir != file.Dir 
-                                            && file.Dir == "lib")) continue;
+                if (compatibleFiles.Any(x => x.FileName == file.FileName && x.Dir == PackagingConstants.Folders.Runtimes)) {
+                    if (file.Dir != PackagingConstants.Folders.Runtimes) continue;
+                    if (file.Dir == PackagingConstants.Folders.Runtimes) {
+                        if (_isWindows && file.Platform != "win") continue;
+                        if (!_isWindows && file.Platform == "win") continue;
+                    }
+                }
                 if (file.Culture != "") continue;
                 var relativePath = file.Path.Replace('/', Path.DirectorySeparatorChar);
                 var destPath = Path.Combine(extractDir, relativePath);
@@ -350,9 +344,23 @@ public class NuGetInstaller
         }
     }
 
+    private static string GetPlatform(string path)
+    {
+        var parts = path.Split(Path.DirectorySeparatorChar);
+        if (parts[0] == PackagingConstants.Folders.Runtimes)
+        {
+            return parts[1];
+        }
+        return string.Empty;
+    }
+
     private static string GetCulture(string path)
     {
         var parts = path.Split(Path.DirectorySeparatorChar);
+        if (parts[0] == PackagingConstants.Folders.Runtimes)
+        {
+            return parts.Length > 5 ? parts[4] : string.Empty;
+        }
         if (parts.Length > 3)
         {
             return parts[2];
@@ -365,32 +373,24 @@ public class NuGetInstaller
         (string dir, string tfm) result = (string.Empty, string.Empty);
         var parts = path.Split(Path.DirectorySeparatorChar);
         var libIndex = Array.IndexOf(parts, PackagingConstants.Folders.Lib);
+        var runtimeIndex = Array.IndexOf(parts, PackagingConstants.Folders.Runtimes); // 先檢查如果有 runtime 的話，要以 runtime 目錄下的 lib 為主
+        if (runtimeIndex >= 0 && runtimeIndex + 1 < parts.Length)
+        {
+            result.dir = PackagingConstants.Folders.Runtimes;
+            result.tfm = (parts[libIndex + 1]).ToLower();
+            return result;
+        }
         if (libIndex >= 0 && libIndex + 1 < parts.Length)
         {
             result.dir = PackagingConstants.Folders.Lib;
             result.tfm = (parts[libIndex + 1]).ToLower();
             return result;
         }
-        var refIndex = Array.IndexOf(parts, PackagingConstants.Folders.Ref);
-        if (refIndex >= 0 && refIndex + 1 < parts.Length)
-        {
-            result.dir = PackagingConstants.Folders.Ref;
-            result.tfm = (parts[refIndex + 1]).ToLower();
-            return result;
-        }
         return result;
-    }
-
-    private static string GetRuntimeIdentifier(string path)
-    {
-        var parts = path.Split(Path.DirectorySeparatorChar);
-        var ridIndex = Array.FindIndex(parts, p => p.Contains("-x") || p.Contains("-arm"));
-        return ridIndex >= 0 ? parts[ridIndex] : string.Empty;
     }
 
     private static bool IsCompatibleFramework(string name, string framework, string currentRuntime)
     {
-        // Console.WriteLine($"Checking compatibility Name: {name} between {currentRuntime} and {framework}");
         if (string.IsNullOrEmpty(framework)) return true;
         if (currentRuntime.Contains(framework.Split('.')[0])) return true;
         
