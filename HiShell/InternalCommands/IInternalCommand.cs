@@ -8,4 +8,5 @@ public interface IInternalCommand
     bool Execute(string cmdname, string cmd, string buffer, EnterPressArgs? epr, TextWriter console);
     void Usage();
     TextWriter ConsoleOut { get; }
+    bool KeepHistory { get; }
 }

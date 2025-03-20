@@ -414,6 +414,7 @@ public class NuGetInstaller
     public void ShowNugetPackages()
     {
         if (!Directory.Exists(NugetPackageDir)) return;
+        Console.WriteLine();
 
         foreach (var dir in Directory.GetDirectories(NugetPackageDir))
         {
@@ -434,7 +435,10 @@ public class NuGetInstaller
         (int delFiles, int delDirs) result = (0, 0);
         if (!Directory.Exists(NugetPackageDir)) return result;
 
-        string nupkgPattern = string.IsNullOrEmpty(nugetName) ? "*.nupkg" : $"{nugetName}.nupkg";
+        Console.WriteLine();
+
+        var hasExtension = Path.GetExtension(nugetName) != "";
+        string nupkgPattern = string.IsNullOrEmpty(nugetName) ? "*.nupkg" : $"{nugetName}{(hasExtension?"":".nupkg")}";
         foreach (var nupkg in Directory.GetFiles(NugetPackageDir, nupkgPattern, SearchOption.TopDirectoryOnly))
         {
             result.delFiles++;
@@ -442,7 +446,7 @@ public class NuGetInstaller
             File.Delete(nupkg);
         }
 
-        string dllPattern = string.IsNullOrEmpty(nugetName) ? "*.dll" : $"{nugetName}.dll";
+        string dllPattern = string.IsNullOrEmpty(nugetName) ? "*.dll" : $"{nugetName}{(hasExtension?"":".dll")}";
         foreach (var dll in Directory.GetFiles(NugetPackageDir, dllPattern, SearchOption.TopDirectoryOnly))
         {
             result.delFiles++;

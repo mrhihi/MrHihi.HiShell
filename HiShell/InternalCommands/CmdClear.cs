@@ -24,4 +24,5 @@ public class CmdClear: CommandBase
         }
         return true;
     }
+    public override bool KeepHistory => false;
 }

@@ -41,7 +41,7 @@ public abstract class CommandBase: IInternalCommand
             Console.SetOut(origOut);
         }
     }
-
+    public virtual bool KeepHistory => true;
     protected virtual void ShowInvalidArgument()
     {
         Console.WriteLine("Invalid argument.");

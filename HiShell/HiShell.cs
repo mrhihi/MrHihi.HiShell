@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
 using MrHihi.HiConsole;
+using MrHihi.HiConsole.Draw;
 using MrHihi.HiShell.InternalCommands;
 
 namespace MrHihi.HiShell;
@@ -18,18 +19,24 @@ public class HiShell
         }
         public static string GetBuffer() => _env?.GetBuffer()??string.Empty;
         public static string[] GetCommandlineArgs() => _env?.GetCommandlineArgs()??[];
+        public static void Print(List<List<object>> data, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative) => ConsoleTable.Print(data, format);
+        public static void Print<T>(IEnumerable<T> data, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative) => ConsoleTable.Print(data, format);
+        public static void Print<T>(IEnumerable<IEnumerable<T>> tables, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative) => ConsoleTable.Print(tables, format);
         public static TextWriter Console => _env?.Console??throw new InvalidOperationException("Console is not initialized.");
     }
     internal readonly NuGetInstaller _nuget;
     internal readonly List<IInternalCommand> _internalCommands;
     private readonly CommandPrompt _console;
     internal readonly HistoryCollection _histories = new HistoryCollection();
+    internal readonly string _runCmdPrefix;
 
     public HiShell()
     {
+        _runCmdPrefix = Environment.GetEnvironmentVariable("HiShellRunCmdPrefix", EnvironmentVariableTarget.Process)??"!";
         var promptMessage = Environment.GetEnvironmentVariable("HiShellPromptMessage", EnvironmentVariableTarget.Process)??"─> ";
         var welcomeMessage = Environment.GetEnvironmentVariable("HiShellWelcomeMessage", EnvironmentVariableTarget.Process)??"Welcome to HiShell v1.0\nPress `Ctrl+D` to exit. Input `/help` for help.\n";
         var workingDir = Environment.GetEnvironmentVariable("HiShellWorkingDirectory", EnvironmentVariableTarget.Process)??Environment.CurrentDirectory;
+
         _nuget = new NuGetInstaller(workingDir);
         if (!string.IsNullOrEmpty(workingDir) && Directory.Exists(workingDir))
         {
@@ -54,7 +61,7 @@ public class HiShell
 
     private void Console_Console_PrintInfo(object? sender, PrintInfoArgs e)
     {
-        e.Info = $" ┌──┤ {e.Info} HI/HC:{_histories.SeekIndex}/{_histories.Count}";
+        e.Info = $"╭─┤{e.Info} HI/HC:{_histories.SeekIndex}/{_histories.Count}";
     }
 
     private void Console_CommandInput_TouchTop(object? sender, CommandTouchArgs e)
@@ -113,7 +120,7 @@ public class HiShell
             Console.WriteLine();
         }
         history.ConsoleOutput = ic.ConsoleOut.ToString();
-        _histories.Add(history);
+        if (ic.KeepHistory) _histories.Add(history);
         Console.WriteLine();
         return true;
     }
@@ -165,34 +172,64 @@ public class HiShell
        return result??"";
     }
 
-    private string getCommandName(string command)
+    private (string cmdname, string cmdnameWithoutPrefix, bool prefixok) getCommandName(string command)
     {
         var commandParts = command.Split(' ');
-        var commandName = commandParts[0];
-        return commandName;
+        (string cmdname, string cmdnameWithoutPrefix, bool prefixok) result = (commandParts[0], commandParts[0], false);
+        if (hasCmdPrefix())
+        {
+            if (commandParts[0].StartsWith(_runCmdPrefix))
+            {
+                result.cmdnameWithoutPrefix = commandParts[0].Substring(_runCmdPrefix.Length);
+                result.prefixok = true;
+            }
+            else
+            {
+                result.prefixok = false;
+            }
+        }
+        return result;
     }
 
     private void runCommand(EnterPressArgs e)
     {
-        var commandName = getCommandName(e.Command);
-        if (runInternalCommand(e, commandName))
+        var cmd = getCommandName(e.Command);
+        if (runInternalCommand(e, cmd.cmdname))
         {
             return;
         }
-        runExternalCommand(e, commandName).Wait();
+        runExternalCommand(e, cmd.cmdnameWithoutPrefix).Wait();
+    }
+
+    private bool hasCmdPrefix()
+    {
+        return _runCmdPrefix.Length > 0;
+    }   
+
+    private bool checkExternalCmd(string cmdname, string cmdnameWithoutPrefix, bool prefixok)
+    {
+
+        if ((hasCmdPrefix() && prefixok) || _runCmdPrefix.Length == 0)
+        {
+            // 檢查 csx 目錄下是否有 command 的目錄及 command.csx 的檔案
+            if (Directory.Exists(Path.Combine(Environment.CurrentDirectory, cmdnameWithoutPrefix)) 
+                && File.Exists(Path.Combine(Environment.CurrentDirectory, cmdnameWithoutPrefix, $"{cmdnameWithoutPrefix}.csx")))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private bool checkCommand(string command)
     {
-        var commandName = getCommandName(command);
-        if (_internalCommands.Any(x => x.NeedExecute(commandName, command)))
+        var cmd = getCommandName(command);
+        if (_internalCommands.Any(x => x.NeedExecute(cmd.cmdname, command)))
         {
             return true;
         }
-        else if (Directory.Exists(Path.Combine(Environment.CurrentDirectory, commandName)) 
-                && File.Exists(Path.Combine(Environment.CurrentDirectory, commandName, $"{commandName}.csx")))
+        else if (checkExternalCmd(cmd.cmdname, cmd.cmdnameWithoutPrefix, cmd.prefixok))
         {
-            // 檢查 csx 目錄下是否有 command 的目錄及 command.csx 的檔案
             return true;
         }
         return false;
