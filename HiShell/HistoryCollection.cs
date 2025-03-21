@@ -3,7 +3,7 @@
 namespace MrHihi.HiShell;
 public class HistoryCollection: ICollection<History>
 {
-    private int _seekIndex = -1;
+    private int _seekIndex = 0;
     private List<History> _histories = new List<History>();
     public int Count => _histories.Count;
     public int SeekIndex => _seekIndex;
@@ -24,7 +24,7 @@ public class HistoryCollection: ICollection<History>
     public void Clear()
     {
         _histories.Clear();
-        _seekIndex = -1;
+        _seekIndex = 0;
     }
 
     public History? SeekNext()

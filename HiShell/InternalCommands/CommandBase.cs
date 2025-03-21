@@ -1,4 +1,5 @@
 ﻿using MrHihi.HiConsole;
+using MrHihi.HiConsole.Draw;
 
 namespace MrHihi.HiShell.InternalCommands;
 public abstract class CommandBase: IInternalCommand
@@ -13,6 +14,7 @@ public abstract class CommandBase: IInternalCommand
     protected abstract string[] Aliases { get; }
     public abstract bool Run(string cmdname, string cmd, string[] cmds, string buffer, EnterPressArgs? epr);
     public abstract void Usage();
+    protected virtual string DisplayAliases => $"[{string.Join(" | ", Aliases)}]";
     public virtual bool NeedExecute(string cmdname, string cmd)
     {
         return Aliases.Any(x => x.ToLower() == cmdname.ToLower());
@@ -27,7 +29,7 @@ public abstract class CommandBase: IInternalCommand
             var cmds = cmd.Split(' ');
             if (IsShowUsage(cmdname, cmds, epr))
             {
-                Console.WriteLine("\nUsage:");
+                Console.WriteLine("\nUsage:".Color(ConsoleColor.DarkGreen));
                 Usage();
                 return true;
             }
@@ -38,14 +40,19 @@ public abstract class CommandBase: IInternalCommand
         }
         finally
         {
+            Console.WriteLine();
             Console.SetOut(origOut);
         }
     }
     public virtual bool KeepHistory => true;
-    protected virtual void ShowInvalidArgument()
+    protected virtual void ShowInvalidArgument(string msg = "")
     {
-        Console.WriteLine("Invalid argument.");
-        Console.WriteLine("\nUsage:");
+        Console.WriteLine("Invalid argument.".Color(ConsoleColor.Red));
+        if (!string.IsNullOrEmpty(msg))
+        {
+            Console.WriteLine(msg.Color(ConsoleColor.Red));
+        }
+        Console.WriteLine("\nUsage:".Color(ConsoleColor.DarkGreen));
         Usage();
     }
 }

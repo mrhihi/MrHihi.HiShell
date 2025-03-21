@@ -19,16 +19,20 @@ public class HiShell
         }
         public static string GetBuffer() => _env?.GetBuffer()??string.Empty;
         public static string[] GetCommandlineArgs() => _env?.GetCommandlineArgs()??[];
-        public static void Print(List<List<object>> data, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative) => ConsoleTable.Print(data, format);
-        public static void Print<T>(IEnumerable<T> data, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative) => ConsoleTable.Print(data, format);
-        public static void Print<T>(IEnumerable<IEnumerable<T>> tables, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative) => ConsoleTable.Print(tables, format);
+        public static void Print(List<List<object>> data, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative)
+                            => ConsoleTable.Print(data, format, ConsoleTableOptions.Default.WithOutputTo(Console));
+        public static void Print<T>(IEnumerable<T> data, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative)
+                            => ConsoleTable.Print(data, format, ConsoleTableOptions.Default.WithOutputTo(Console));
+        public static void Print<T>(IEnumerable<IEnumerable<T>> tables, ConsoleTableEnums.Format format = ConsoleTableEnums.Format.Alternative)
+                            => ConsoleTable.Print(tables, format, ConsoleTableOptions.Default.WithOutputTo(Console));
         public static TextWriter Console => _env?.Console??throw new InvalidOperationException("Console is not initialized.");
     }
     internal readonly NuGetInstaller _nuget;
     internal readonly List<IInternalCommand> _internalCommands;
-    private readonly CommandPrompt _console;
+    internal readonly CommandPrompt _console;
     internal readonly HistoryCollection _histories = new HistoryCollection();
     internal readonly string _runCmdPrefix;
+    internal TextAreaCoordinate TextArea => _console.TextArea;
 
     public HiShell()
     {
@@ -61,11 +65,22 @@ public class HiShell
 
     private void Console_Console_PrintInfo(object? sender, PrintInfoArgs e)
     {
-        e.Info = $"╭─┤{e.Info} HI/HC:{_histories.SeekIndex}/{_histories.Count}";
+        var s = $"╭─┤ {e.Info} HI/HC:{_histories.SeekIndex}/{_histories.Count} ├";
+        var l = s.Length;
+        var w = Console.WindowWidth;
+        if (l < w)
+        {
+            e.Info = s.PadRight(w - 1, '─') + "╮";
+        }
+        else
+        {
+            e.Info = s.Substring(0, w - 1) + "╮";
+        }
     }
 
     private void Console_CommandInput_TouchTop(object? sender, CommandTouchArgs e)
     {
+        if (_histories.Count == 0 || !string.IsNullOrEmpty(e.CurrBuffer)) return;
         var last = _histories.SeekPrevious();
         e.Command = last?.Command??"";
         e.Setting = true;
@@ -73,6 +88,7 @@ public class HiShell
 
     private void Console_CommandInput_TouchBottom(object? sender, CommandTouchArgs e)
     {
+        if (_histories.Count == 0 || !string.IsNullOrEmpty(e.CurrBuffer)) return;
         var last = _histories.SeekNext();
         e.Command = last?.Command??"";
         e.Setting = true;
@@ -83,9 +99,7 @@ public class HiShell
         if ( checkCommand(e.Command) )
         {
             e.Triggered = true;
-            e.WriteResult(()=>{
-                runCommand(e);
-            });
+            runCommand(e);
         }
     }
 
@@ -121,7 +135,7 @@ public class HiShell
         }
         history.ConsoleOutput = ic.ConsoleOut.ToString();
         if (ic.KeepHistory) _histories.Add(history);
-        Console.WriteLine();
+///        Console.WriteLine();
         return true;
     }
 
@@ -141,7 +155,10 @@ public class HiShell
                             .AddReferences(Assembly.GetExecutingAssembly())
                             .AddReferences(references)
                             .AddReferences(references2)
-                            .AddImports("System", "System.Text", "System.IO", "System.Net.Http", "System.Collections.Generic", "System.Threading.Tasks")
+                            .AddImports("System", "System.Text", "System.IO", "System.Net.Http", 
+                                        "System.Collections.Generic", "System.Threading.Tasks", 
+                                        "MrHihi.HiConsole", "MrHihi.HiConsole.Draw", 
+                                        "MrHihi.HiShell", "MrHihi.HiShell.InternalCommands")
                             ;
         return CSharpScript.Create<string>(processedScript2, globalsType: typeof(Globals), options: ccsOptions);
     }
@@ -151,7 +168,8 @@ public class HiShell
         var history = new History(buffer, cmdName, command);
         ShellEnvironment? args = null;
         string? result = null;
-        Console.WriteLine($"Running command: {command} ...");
+        Console.CursorLeft = 0;
+        Console.WriteLine($" {"▌".Color(ConsoleColor.Green)} Running command: {command} ...");
         Console.WriteLine();
         try {
             var script = await createScript(scriptCode, cmdName);
@@ -167,6 +185,11 @@ public class HiShell
         }
         history.ConsoleOutput = args?.Console?.ToString()??"";
         _histories.Add(history);
+        var lc = history.ConsoleOutput.LastOrDefault();
+        if (lc != '\n')
+        {
+            Console.WriteLine();
+        }
         Console.WriteLine();
         Console.WriteLine();
        return result??"";

@@ -11,7 +11,7 @@ public class CmdExit: CommandBase
     }
     public override void Usage()
     {
-        Console.WriteLine($"    [{string.Join(" | ", Aliases)}]: Exit HiShell.");
+        Console.WriteLine($"    {DisplayAliases} : Exit HiShell.");
     }
     public override bool Run(string cmdname, string cmd, string[] cmds, string buffer, EnterPressArgs? epr)
     {

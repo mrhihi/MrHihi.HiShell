@@ -1,26 +1,35 @@
 ﻿using System.Text;
+using System.Text.RegularExpressions;
 using MrHihi.HiConsole;
+using MrHihi.HiConsole.Draw;
 using TextCopy;
 
 namespace MrHihi.HiShell.InternalCommands;
 public class CmdHistory : CommandBase
 {
     public CmdHistory(HiShell shell) : base(shell) { }
-    protected override string[] Aliases => new string[] { "/history" };
+    protected override string[] Aliases => new string[] { "/history", "/hist" };
     protected override bool IsShowUsage(string cmdname, string[] cmds, EnterPressArgs? epr)
     {
         return (epr == null || cmds.Length < 2 || cmds[1].IsIn(true, "help", "?"));
     }
     public override void Usage()
     {
-        Console.WriteLine($"    [{string.Join("|", Aliases)}]: [ <number> | all | clear | clip <number> | clipbuff <number> | save <file>]");
-        Console.WriteLine("        <number>: Show the specified command history.");
-        Console.WriteLine("        all: Show all command history.");
-        Console.WriteLine("        clear: Clear command history.");
-        Console.WriteLine("        clip <number>: Copy the console output to clipboard. if <number> is not specified, copy the last command output.");
-        Console.WriteLine("        clipbuff <number>: Copy the buffer to clipboard. if <number> is not specified, copy the last command buffer.");
-        Console.WriteLine("        save <file>: Save command history to file.");
+        Console.WriteLine($"    {DisplayAliases} [<number> | all | clear | clip <number> | clipbuff <number> | save <file>] :");
+        Console.WriteLine("        <number> : Show the specified command history.");
+        Console.WriteLine("        all : Show all command history.");
+        Console.WriteLine("        clear : Clear command history.");
+        Console.WriteLine("        clip <number> : Copy the console output to clipboard. if <number> is not specified, copy the last command output.");
+        Console.WriteLine("        clipbuff <number> : Copy the buffer to clipboard. if <number> is not specified, copy the last command buffer.");
+        Console.WriteLine("        save <file> : Save command history to file.");
     }
+
+    private string remvoeAsciiControl(string input)
+    {
+        var reg = new Regex(@"\x1B\[[0-?]*[ -/]*[@-~]");
+        return reg.Replace(input, "");
+    }
+
     private string IndentOutput(string? output)
     {
         return string.Join('\n', (output ?? "").Split('\n').Select(x => $"│    {x}"));
@@ -36,7 +45,7 @@ public class CmdHistory : CommandBase
         }
         writer.WriteLine($"│ Command: {h.Command}");
         writer.WriteLine($"│ Console output:\n{show(h.ConsoleOutput)}");
-        writer.WriteLine($"└{new string('─', Console.WindowWidth - 1)}");
+        writer.WriteLine($"╰{new string('─', Console.WindowWidth - 2)}╯");
         return writer;
     }
     public override bool Run(string cmdname, string cmd, string[] cmds, string buffer, EnterPressArgs? epr)
@@ -58,7 +67,7 @@ public class CmdHistory : CommandBase
             int c = 0;
             foreach (var h in _shell._histories)
             {
-                Console.WriteLine($"┌ History: [{c++}]");
+                Console.WriteLine($"┌ {"History".Color(ConsoleColor.Blue)}: "+$"[{c++}]".Color(ConsoleColor.Yellow));
                 Console.WriteLine(PrintHistory(h));
             }
 
@@ -111,7 +120,7 @@ public class CmdHistory : CommandBase
                     if (index >= 0 && index < _shell._histories.Count)
                     {
                         var h = _shell._histories[index];
-                        ClipboardService.SetText(h.ConsoleOutput??"");
+                        ClipboardService.SetText(remvoeAsciiControl(h.ConsoleOutput??""));
                         Console.WriteLine("Result copied to clipboard.");
                     }
                 }
@@ -125,8 +134,36 @@ public class CmdHistory : CommandBase
                 var last = _shell._histories.Last();
                 if (last == null) return true;
                 if (string.IsNullOrEmpty(last.ConsoleOutput)) return true;
-                ClipboardService.SetText(last.ConsoleOutput);
+                ClipboardService.SetText(remvoeAsciiControl(last.ConsoleOutput));
                 Console.WriteLine("Result copied to clipboard.");
+            }
+            else
+            {
+                ShowInvalidArgument();
+            }
+        }
+        else if (cmds[1].ToLower() == "select")
+        {
+            if (cmds.Length < 3)
+            {
+                ShowInvalidArgument("Please specify the history number.");
+                return true;
+            }
+            if (cmds[2].IsNumeric())
+            {
+                var index = int.Parse(cmds[2]);
+                if (index >= 0 && index < _shell._histories.Count)
+                {
+                    var h = _shell._histories[index];
+                    var s = new StringBuilder();
+                    s.AppendLine(h.Buffer).Append(h.Command);
+                    _shell.TextArea.ResetLines(s.ToString(), true);
+                    if (epr != null) epr.Triggered = false;
+                }
+                else
+                {
+                    ShowInvalidArgument("Invalid history number.");
+                }
             }
             else
             {
@@ -151,7 +188,9 @@ public class CmdHistory : CommandBase
                 StringBuilder sb = new StringBuilder();
                 foreach (var h in _shell._histories)
                 {
-                    sb.AppendLine(PrintHistory(h).ToString());
+                    var nh = new History(h);
+                    nh.ConsoleOutput = remvoeAsciiControl(nh.ConsoleOutput??"");
+                    sb.AppendLine(PrintHistory(nh).ToString());
                     sb.AppendLine();
                 }
                 File.WriteAllText(filePath, sb.ToString());

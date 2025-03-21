@@ -11,9 +11,11 @@ public class CmdNuget: CommandBase
     }
     public override void Usage()
     {
-        Console.WriteLine($"    [{string.Join("|", Aliases)}]: [ls | remove | rm | delete | del] [<nuget_package_name> | all | *]");
-        Console.WriteLine("        ls: Show cached nuget files.");
-        Console.WriteLine("        [remove | delete | del]: Remove cached nuget files.");
+        Console.WriteLine($"    {DisplayAliases} [ls | clear | remove | rm | delete | del] [<nuget_package_name> | all | *] :");
+        Console.WriteLine($"        ls : Show cached nuget files.");
+        Console.WriteLine($"        clear : Clear all cached nuget files.");
+        Console.WriteLine($"        remove, delete, del :");
+        Console.WriteLine($"            <nuget_package_name>, all, * : Remove specified nuget packages.");
     }
     public override bool Run(string cmdname, string cmd, string[] cmds, string buffer, EnterPressArgs? epr)
     {

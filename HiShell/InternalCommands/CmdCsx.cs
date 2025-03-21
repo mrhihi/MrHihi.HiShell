@@ -11,9 +11,9 @@ public class CmdCsx: CommandBase
     }
     public override void Usage()
     {
-        Console.WriteLine($"    [{string.Join("|", Aliases)}]: <run | [list | ls]>");
-        Console.WriteLine("        run: Run the specified CS from buffer.");
-        Console.WriteLine("        list: List Predefined csx script.");
+        Console.WriteLine($"    {DisplayAliases} [run | list | ls] :");
+        Console.WriteLine("        run : Run the specified CS from buffer.");
+        Console.WriteLine("        list, ls : List Predefined csx script.");
     }
     public override bool Run(string cmdname, string cmd, string[] cmds, string buffer, EnterPressArgs? epr)
     {
