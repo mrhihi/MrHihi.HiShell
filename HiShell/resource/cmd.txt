@@ -1,0 +1,8 @@
+@echo off
+Set HiShellShebang="cmd.exe"
+Set HiShellRunCmdPrefix="!"
+Set HiShellPromptMessage="╰─ HiShell> "
+Set HiShellWelcomeMessage="Welcome to HiShell v1.0|Press `Ctrl+D` to exit. Input `/help` for help.|Use prefix `!` to run external csx.| Use prefix \`~\` to run shell command|"
+Set HiShellWorkingDirectory="<YOUR WORKING DIRECTORY>"
+
+dotnet hishell

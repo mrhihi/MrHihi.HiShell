@@ -1,0 +1,12 @@
+#!/bin/zsh
+
+export HiShellShebang="/bin/zsh"
+export HiShellRunCmdPrefix="!"
+export HiShellPromptMessage="╰─ HiShell> "
+export HiShellWelcomeMessage="Welcome to HiShell v1.0
+Press \`Ctrl+D\` to exit. Input \`/help\` for help.
+Use prefix \`!\` to run external csx. Use prefix \`~\` to run shell command.
+"
+export HiShellWorkingDirectory="<YOUR WORKING DIRECTORY>"
+
+dotnet hishell

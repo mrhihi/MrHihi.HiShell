@@ -5,9 +5,25 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- <PublishSingleFile>true</PublishSingleFile> -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>dotnet-hishell</ToolCommandName>
+    <PackageId>MrHihi.HiShell</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>mrhihi</Authors>
+    <Description>HiShell is a simple shell simulator that supports a basic text editor for inputting commands.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/mrhihi/MrHihi.HiShell</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/mrhihi/MrHihi.HiShell</RepositoryUrl>
+    <PackageReadmeFile>Readme.md</PackageReadmeFile>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
   </PropertyGroup>
-
+  <ItemGroup>
+    <EmbeddedResource Include="resource\cmd.txt" />
+    <EmbeddedResource Include="resource\zsh.txt" />
+  </ItemGroup>
+  <ItemGroup>
+      <None Include="..\Readme.md" Pack="true" PackagePath="\"/>
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.13.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.3" />

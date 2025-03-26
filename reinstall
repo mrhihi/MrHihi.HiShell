@@ -1,0 +1,4 @@
+#!/bin/zsh
+
+dotnet tool uninstall -g mrhihi.hishell
+dotnet tool install -g mrhihi.hishell

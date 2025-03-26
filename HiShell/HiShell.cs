@@ -33,19 +33,24 @@ public class HiShell
     internal readonly HistoryCollection _histories = new HistoryCollection();
     internal readonly string _runCmdPrefix;
     internal TextAreaCoordinate TextArea => _console.TextArea;
-
+    internal ConsoleKeyInfo? prevKey = null;
     public HiShell()
     {
         _runCmdPrefix = Environment.GetEnvironmentVariable("HiShellRunCmdPrefix", EnvironmentVariableTarget.Process)??"!";
         var promptMessage = Environment.GetEnvironmentVariable("HiShellPromptMessage", EnvironmentVariableTarget.Process)??"─> ";
         var welcomeMessage = Environment.GetEnvironmentVariable("HiShellWelcomeMessage", EnvironmentVariableTarget.Process)??"Welcome to HiShell v1.0\nPress `Ctrl+D` to exit. Input `/help` for help.\n";
         var workingDir = Environment.GetEnvironmentVariable("HiShellWorkingDirectory", EnvironmentVariableTarget.Process)??Environment.CurrentDirectory;
-
+        if (welcomeMessage.Contains("|"))
+        {
+            welcomeMessage = welcomeMessage.Replace("|", "\n");
+        }
         _nuget = new NuGetInstaller(workingDir);
         if (!string.IsNullOrEmpty(workingDir) && Directory.Exists(workingDir))
         {
             Environment.CurrentDirectory = workingDir;
         }
+        Console.WriteLine($"Currently Working Directory: {workingDir}");
+        Console.WriteLine();
 
         // 尋找 namespace InternalCommands 下所有 IInternalCommand 的實作
         _internalCommands = Assembly.GetExecutingAssembly().GetTypes()
@@ -60,12 +65,42 @@ public class HiShell
         _console.CommandInput_TouchTop += Console_CommandInput_TouchTop;
         _console.CommandInput_TouchBottom += Console_CommandInput_TouchBottom;
         _console.Console_PrintInfo += Console_Console_PrintInfo;
+        _console.KeyPress += Console_KeyPress;
         _console.Start();
+    }
+
+    private void Console_KeyPress(object? sender, KeyPressArgs e)
+    {
+        if (prevKey != null)
+        {
+            if (prevKey.Value.Key == ConsoleKey.Escape)
+            {
+                if (e.Key.Key == ConsoleKey.D)
+                {
+                    _console.TextArea.DeleteLine();
+                    e.Processed = true;
+                    prevKey = null;
+                    _console.TextArea.Loop();
+                }
+            }
+            prevKey = null;
+            return;
+        }
+        if (e.Key.Key == ConsoleKey.Escape)
+        {
+            prevKey = e.Key;
+        }
+    }
+
+    private string getPrevKey()
+    {
+        if (prevKey == null) return "";
+        return $" [ESC]";
     }
 
     private void Console_Console_PrintInfo(object? sender, PrintInfoArgs e)
     {
-        var s = $"╭─┤ {e.Info} HI/HC:{_histories.SeekIndex}/{_histories.Count} ├";
+        var s = $"╭─┤ {e.Info} HI/HC:{_histories.SeekIndex}/{_histories.Count}{getPrevKey()} ├";
         var l = s.Length;
         var w = Console.WindowWidth;
         if (l < w)
@@ -127,15 +162,15 @@ public class HiShell
 
         var history = new History(buffer, lcmdName, command);
         try {
+            Console.CursorLeft = 0;
             ic.Execute(lcmdName, command, trimEndString(buffer, command).TrimEnd('\n'), e, new HiConsole());
         } catch (Exception ex) {
             Console.WriteLine($"Error: {ex.Message}");
             // Console.WriteLine(ex.StackTrace);
             Console.WriteLine();
         }
-        history.ConsoleOutput = ic.ConsoleOut.ToString();
+        history.ConsoleOutput = (ic.ConsoleOut.ToString()??"").Trim().TrimEnd("\n".ToCharArray());
         if (ic.KeepHistory) _histories.Add(history);
-///        Console.WriteLine();
         return true;
     }
 
@@ -169,7 +204,7 @@ public class HiShell
         ShellEnvironment? args = null;
         string? result = null;
         Console.CursorLeft = 0;
-        Console.WriteLine($" {"▌".Color(ConsoleColor.Green)} Running command: {command} ...");
+        Console.WriteLine($" {"▌".Color(ConsoleColor.Green)} " + $"Running: {command} ...".Color(ConsoleColor.Yellow));
         Console.WriteLine();
         try {
             var script = await createScript(scriptCode, cmdName);
@@ -183,7 +218,7 @@ public class HiShell
             // Console.WriteLine(ex.StackTrace);
             Console.WriteLine();
         }
-        history.ConsoleOutput = args?.Console?.ToString()??"";
+        history.ConsoleOutput = (args?.Console?.ToString()??"").Trim().TrimEnd("\n".ToCharArray());
         _histories.Add(history);
         var lc = history.ConsoleOutput.LastOrDefault();
         if (lc != '\n')
