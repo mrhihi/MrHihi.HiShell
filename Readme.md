@@ -1,6 +1,7 @@
 ﻿# HiShell
 
 HiShell is a simple shell simulator that supports a basic text editor for inputting commands.
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mrhihi/MrHihi.HiShell)
 
 ## Usage
 
